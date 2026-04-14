@@ -417,6 +417,21 @@ async def http_handler(request):
     
     return web.Response(status=404, text='Not Found\n')
 
+async def make_app():
+    """Gunicorn 工厂函数"""
+    app = web.Application()
+    app.router.add_get('/', http_handler)
+    app.router.add_get(f'/{WSPATH}', websocket_handler)
+    
+    # 注册清理函数，确保 Gunicorn worker 退出时关闭全局 Session
+    async def cleanup_background_tasks(app):
+        global GLOBAL_DOH_SESSION
+        if GLOBAL_DOH_SESSION and not GLOBAL_DOH_SESSION.closed:
+            await GLOBAL_DOH_SESSION.close()
+            
+    app.on_cleanup.append(cleanup_background_tasks)
+    return app
+
 async def main():
     actual_port = PORT
     
@@ -430,10 +445,7 @@ async def main():
             logger.error("No available ports found")
             sys.exit(1)
     
-    app = web.Application()
-    
-    app.router.add_get('/', http_handler)
-    app.router.add_get(f'/{WSPATH}', websocket_handler)
+    app = await make_app()
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -446,9 +458,6 @@ async def main():
     except KeyboardInterrupt:
         pass
     finally:
-        global GLOBAL_DOH_SESSION
-        if GLOBAL_DOH_SESSION and not GLOBAL_DOH_SESSION.closed:
-            await GLOBAL_DOH_SESSION.close()
         await runner.cleanup()
 
 if __name__ == '__main__':
